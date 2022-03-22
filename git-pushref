@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+#
+# Push an arbitrary ref without checking out the repository 
+#
+# SPDX-FileCopyrightText: 2022 Emanuele Aina <emanuele.aina@collabora.com>
+# SPDX-License-Identifier: MIT
+
+import argparse
+import subprocess
+import urllib.request
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--url', required=True)
+parser.add_argument('--password', required=True)
+parser.add_argument('--username', required=True)
+parser.add_argument('--hash', required=True)
+parser.add_argument('--branch', required=True)
+parser.add_argument('--option', action='append')
+args = parser.parse_args()
+
+emptypack = subprocess.run(['git', 'pack-objects', '-q', '--stdout'], stdin=subprocess.DEVNULL, check=True, capture_output=True).stdout
+
+def http_request(url, username, password, headers={}, data=None):
+    password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
+    password_manager.add_password(None, url, username, password)
+    auth_handler = urllib.request.HTTPBasicAuthHandler(password_manager)
+    opener = urllib.request.build_opener(auth_handler)
+    req = urllib.request.Request(url, data=data, headers=headers)
+    res = opener.open(req)
+    return res
+
+def pktline(line):
+    return f"{len(line)+4:04x}{line}".encode()
+
+url = args.url.rstrip('/')
+if not url.endswith('.git'):
+    url += '.git'
+url += '/git-receive-pack'
+capabilities = 'report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1'
+zero = '0000000000000000000000000000000000000000'
+newref = f'refs/heads/{args.branch}'
+data = b''.join([
+    pktline(f'{zero} {args.hash} {newref}\0 {capabilities}'),
+    b'0000',
+    b''.join(pktline(option) for option in args.option),
+    b'0000',
+    emptypack,
+])
+headers = {
+    'Content-Type': 'application/x-git-receive-pack-request',
+    'Accept': 'application/x-git-receive-pack-result',
+}
+res = http_request(url, args.username, args.password, headers, data)
+print(res.status, res.reason)
+print(res.read().decode('utf-8'))
