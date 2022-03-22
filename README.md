@@ -21,4 +21,6 @@ https://gitlab.com/gitlab-org/gitlab/-/issues/223698
 
 MIT
 
+## Related projects
 
+* https://github.com/benhoyt/pygit - just enough git to create a repo and push to GitHub
