@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Push an arbitrary ref without checking out the repository 
+# Push an arbitrary ref without checking out the repository
 #
 # SPDX-FileCopyrightText: 2022 Emanuele Aina <emanuele.aina@collabora.com>
 # SPDX-License-Identifier: MIT
@@ -10,13 +10,14 @@ import subprocess
 import urllib.request
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--url', required=True)
-parser.add_argument('--password', required=True)
-parser.add_argument('--username', required=True)
-parser.add_argument('--ref', required=True)
-parser.add_argument('--branch', required=True)
-parser.add_argument('--option', action='append')
+parser.add_argument("--url", required=True)
+parser.add_argument("--password", required=True)
+parser.add_argument("--username", required=True)
+parser.add_argument("--ref", required=True)
+parser.add_argument("--branch", required=True)
+parser.add_argument("--option", action="append")
 args = parser.parse_args()
+
 
 def http_request(url, username, password, headers={}, data=None):
     password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
@@ -27,8 +28,10 @@ def http_request(url, username, password, headers={}, data=None):
     res = opener.open(req)
     return res
 
+
 def pktline(line):
     return f"{len(line)+4:04x}{line}".encode()
+
 
 def pkt_parse(buffer):
     """
@@ -39,7 +42,7 @@ def pkt_parse(buffer):
         pkt_len = buffer.read(4)
         if len(pkt_len) != 4:
             break
-        if pkt_len == b'0000':
+        if pkt_len == b"0000":
             yield lines
             lines = []
             continue
@@ -49,49 +52,54 @@ def pkt_parse(buffer):
         lines.append(pkt_data)
     yield lines
 
+
 def pushref(git_url, username, password, ref, branch, options=()):
     emptypack = subprocess.run(
-        ['git', 'pack-objects', '-q', '--stdout'],
+        ["git", "pack-objects", "-q", "--stdout"],
         stdin=subprocess.DEVNULL,
         check=True,
-        capture_output=True).stdout
-    url = git_url + '/info/refs?service=git-receive-pack'
+        capture_output=True,
+    ).stdout
+    url = git_url + "/info/refs?service=git-receive-pack"
     res = http_request(url, username, password)
     lines = list(pkt_parse(res))[1]
 
-    ref = ref.encode('utf-8')
+    ref = ref.encode("utf-8")
     commithash = None
     for line in lines:
-        sha1, refname = line.split(b'\x00')[0].split()
-        refvariations = (ref, b'refs/heads/' + ref, b'refs/tags/' + ref)
+        sha1, refname = line.split(b"\x00")[0].split()
+        refvariations = (ref, b"refs/heads/" + ref, b"refs/tags/" + ref)
         if sha1.startswith(ref) or refname in refvariations:
-            commithash = sha1.decode('ascii')
+            commithash = sha1.decode("ascii")
             break
     if not commithash:
         raise Exception(f"ref {ref} not found")
 
-    url = git_url + '/git-receive-pack'
-    capabilities = 'report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1'
-    zero = '0000000000000000000000000000000000000000'
-    newref = f'refs/heads/{branch}'
-    data = b''.join([
-        pktline(f'{zero} {commithash} {newref}\0 {capabilities}'),
-        b'0000',
-        b''.join(pktline(option) for option in options),
-        b'0000',
-        emptypack,
-    ])
+    url = git_url + "/git-receive-pack"
+    capabilities = "report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1"
+    zero = "0000000000000000000000000000000000000000"
+    newref = f"refs/heads/{branch}"
+    data = b"".join(
+        [
+            pktline(f"{zero} {commithash} {newref}\0 {capabilities}"),
+            b"0000",
+            b"".join(pktline(option) for option in options),
+            b"0000",
+            emptypack,
+        ]
+    )
     headers = {
-        'Content-Type': 'application/x-git-receive-pack-request',
-        'Accept': 'application/x-git-receive-pack-result',
+        "Content-Type": "application/x-git-receive-pack-request",
+        "Accept": "application/x-git-receive-pack-result",
     }
     res = http_request(url, username, password, headers, data)
     return res
 
-git_url = args.url.rstrip('/')
-if not git_url.endswith('.git'):
-    git_url += '.git'
+
+git_url = args.url.rstrip("/")
+if not git_url.endswith(".git"):
+    git_url += ".git"
 
 res = pushref(git_url, args.username, args.password, args.ref, args.branch, args.option)
 print(res.status, res.reason)
-print(res.read().decode('utf-8'))
+print(res.read().decode("utf-8"))
