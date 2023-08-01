@@ -13,7 +13,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--url', required=True)
 parser.add_argument('--password', required=True)
 parser.add_argument('--username', required=True)
-parser.add_argument('--hash', required=True)
+parser.add_argument('--ref', required=True)
 parser.add_argument('--branch', required=True)
 parser.add_argument('--option', action='append')
 args = parser.parse_args()
@@ -32,15 +32,50 @@ def http_request(url, username, password, headers={}, data=None):
 def pktline(line):
     return f"{len(line)+4:04x}{line}".encode()
 
-url = args.url.rstrip('/')
-if not url.endswith('.git'):
-    url += '.git'
-url += '/git-receive-pack'
+def pkt_parse(buffer):
+    """
+    Yields an iterator of lists where each flush packet produces a new list
+    """
+    lines = []
+    while True:
+        pkt_len = buffer.read(4)
+        if len(pkt_len) != 4:
+            break
+        if pkt_len == b'0000':
+            yield lines
+            lines = []
+            continue
+        pkt_data_len = int(pkt_len, 16) - 4
+        pkt_data = buffer.read(pkt_data_len)
+        assert len(pkt_data) == pkt_data_len
+        lines.append(pkt_data)
+    yield lines
+
+git_url = args.url.rstrip('/')
+if not git_url.endswith('.git'):
+    git_url += '.git'
+
+url = git_url + '/info/refs?service=git-receive-pack'
+res = http_request(url, args.username, args.password)
+assert res.status == 200
+lines = list(pkt_parse(res))[1]
+
+commithash = None
+for line in lines:
+    sha1, refname = line.split(b'\x00')[0].split()
+    ref = args.ref.encode('utf-8')
+    refvariations = (ref, b'refs/heads/' + ref, b'refs/tags/' + ref)
+    if sha1.startswith(ref) or refname in refvariations:
+        commithash = sha1.decode('ascii')
+        break
+assert commithash
+
+url = git_url + '/git-receive-pack'
 capabilities = 'report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1'
 zero = '0000000000000000000000000000000000000000'
 newref = f'refs/heads/{args.branch}'
 data = b''.join([
-    pktline(f'{zero} {args.hash} {newref}\0 {capabilities}'),
+    pktline(f'{zero} {commithash} {newref}\0 {capabilities}'),
     b'0000',
     b''.join(pktline(option) for option in args.option),
     b'0000',
