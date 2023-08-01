@@ -51,40 +51,44 @@ def pkt_parse(buffer):
         lines.append(pkt_data)
     yield lines
 
+def pushref(git_url, username, password, ref, branch, options=()):
+    url = git_url + '/info/refs?service=git-receive-pack'
+    res = http_request(url, username, password)
+    lines = list(pkt_parse(res))[1]
+
+    ref = ref.encode('utf-8')
+    commithash = None
+    for line in lines:
+        sha1, refname = line.split(b'\x00')[0].split()
+        refvariations = (ref, b'refs/heads/' + ref, b'refs/tags/' + ref)
+        if sha1.startswith(ref) or refname in refvariations:
+            commithash = sha1.decode('ascii')
+            break
+    if not commithash:
+        raise Exception(f"ref {ref} not found")
+
+    url = git_url + '/git-receive-pack'
+    capabilities = 'report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1'
+    zero = '0000000000000000000000000000000000000000'
+    newref = f'refs/heads/{branch}'
+    data = b''.join([
+        pktline(f'{zero} {commithash} {newref}\0 {capabilities}'),
+        b'0000',
+        b''.join(pktline(option) for option in options),
+        b'0000',
+        emptypack,
+    ])
+    headers = {
+        'Content-Type': 'application/x-git-receive-pack-request',
+        'Accept': 'application/x-git-receive-pack-result',
+    }
+    res = http_request(url, username, password, headers, data)
+    return res
+
 git_url = args.url.rstrip('/')
 if not git_url.endswith('.git'):
     git_url += '.git'
 
-url = git_url + '/info/refs?service=git-receive-pack'
-res = http_request(url, args.username, args.password)
-assert res.status == 200
-lines = list(pkt_parse(res))[1]
-
-commithash = None
-for line in lines:
-    sha1, refname = line.split(b'\x00')[0].split()
-    ref = args.ref.encode('utf-8')
-    refvariations = (ref, b'refs/heads/' + ref, b'refs/tags/' + ref)
-    if sha1.startswith(ref) or refname in refvariations:
-        commithash = sha1.decode('ascii')
-        break
-assert commithash
-
-url = git_url + '/git-receive-pack'
-capabilities = 'report-status-v2 side-band-64k push-options object-format=sha1 agent=git/2.35.1'
-zero = '0000000000000000000000000000000000000000'
-newref = f'refs/heads/{args.branch}'
-data = b''.join([
-    pktline(f'{zero} {commithash} {newref}\0 {capabilities}'),
-    b'0000',
-    b''.join(pktline(option) for option in args.option),
-    b'0000',
-    emptypack,
-])
-headers = {
-    'Content-Type': 'application/x-git-receive-pack-request',
-    'Accept': 'application/x-git-receive-pack-result',
-}
-res = http_request(url, args.username, args.password, headers, data)
+res = pushref(git_url, args.username, args.password, args.ref, args.branch, args.option)
 print(res.status, res.reason)
 print(res.read().decode('utf-8'))
