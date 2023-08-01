@@ -18,8 +18,6 @@ parser.add_argument('--branch', required=True)
 parser.add_argument('--option', action='append')
 args = parser.parse_args()
 
-emptypack = subprocess.run(['git', 'pack-objects', '-q', '--stdout'], stdin=subprocess.DEVNULL, check=True, capture_output=True).stdout
-
 def http_request(url, username, password, headers={}, data=None):
     password_manager = urllib.request.HTTPPasswordMgrWithDefaultRealm()
     password_manager.add_password(None, url, username, password)
@@ -52,6 +50,11 @@ def pkt_parse(buffer):
     yield lines
 
 def pushref(git_url, username, password, ref, branch, options=()):
+    emptypack = subprocess.run(
+        ['git', 'pack-objects', '-q', '--stdout'],
+        stdin=subprocess.DEVNULL,
+        check=True,
+        capture_output=True).stdout
     url = git_url + '/info/refs?service=git-receive-pack'
     res = http_request(url, username, password)
     lines = list(pkt_parse(res))[1]
